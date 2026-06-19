@@ -3,11 +3,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import altair as altfrom __future__ import annotations
-
-import sqlite3
-from pathlib import Path
-
 import altair as alt
 import pandas as pd
 import streamlit as st
