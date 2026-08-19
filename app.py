@@ -704,7 +704,26 @@ def all_scores_cte() -> str:
 
 def points_against_detail_query() -> str:
     return """
-        WITH points_against AS (
+        WITH roster_starter_points AS (
+            SELECT year, week, team_key, ROUND(SUM(points), 2) AS starter_points
+            FROM rosters
+            WHERE COALESCE(selected_position, '') NOT IN ('BN', 'IR', '')
+            GROUP BY year, week, team_key
+        ), matchup_scores AS (
+            SELECT year, week, team1_key AS team_key, ROUND(team1_points, 2) AS official_points
+            FROM matchups
+            UNION ALL
+            SELECT year, week, team2_key AS team_key, ROUND(team2_points, 2) AS official_points
+            FROM matchups
+        ), valid_team_scores AS (
+            SELECT r.year, r.week, r.team_key
+            FROM roster_starter_points r
+            JOIN matchup_scores m
+              ON r.year = m.year
+             AND r.week = m.week
+             AND r.team_key = m.team_key
+            WHERE ABS(r.starter_points - m.official_points) <= 0.05
+        ), points_against AS (
             SELECT
                 m.year,
                 m.week,
@@ -720,6 +739,10 @@ def points_against_detail_query() -> str:
               ON r.year = m.year
              AND r.week = m.week
              AND r.team_key = m.team2_key
+            JOIN valid_team_scores v
+              ON v.year = m.year
+             AND v.week = m.week
+             AND v.team_key = m.team2_key
             WHERE COALESCE(r.selected_position, '') NOT IN ('BN', 'IR', '')
 
             UNION ALL
@@ -739,6 +762,10 @@ def points_against_detail_query() -> str:
               ON r.year = m.year
              AND r.week = m.week
              AND r.team_key = m.team1_key
+            JOIN valid_team_scores v
+              ON v.year = m.year
+             AND v.week = m.week
+             AND v.team_key = m.team1_key
             WHERE COALESCE(r.selected_position, '') NOT IN ('BN', 'IR', '')
         )
         SELECT
@@ -751,7 +778,26 @@ def points_against_detail_query() -> str:
 
 def position_points_against_query() -> str:
     return """
-        WITH points_against AS (
+        WITH roster_starter_points AS (
+            SELECT year, week, team_key, ROUND(SUM(points), 2) AS starter_points
+            FROM rosters
+            WHERE COALESCE(selected_position, '') NOT IN ('BN', 'IR', '')
+            GROUP BY year, week, team_key
+        ), matchup_scores AS (
+            SELECT year, week, team1_key AS team_key, ROUND(team1_points, 2) AS official_points
+            FROM matchups
+            UNION ALL
+            SELECT year, week, team2_key AS team_key, ROUND(team2_points, 2) AS official_points
+            FROM matchups
+        ), valid_team_scores AS (
+            SELECT r.year, r.week, r.team_key
+            FROM roster_starter_points r
+            JOIN matchup_scores m
+              ON r.year = m.year
+             AND r.week = m.week
+             AND r.team_key = m.team_key
+            WHERE ABS(r.starter_points - m.official_points) <= 0.05
+        ), points_against AS (
             SELECT
                 m.year,
                 m.week,
@@ -765,6 +811,10 @@ def position_points_against_query() -> str:
               ON r.year = m.year
              AND r.week = m.week
              AND r.team_key = m.team2_key
+            JOIN valid_team_scores v
+              ON v.year = m.year
+             AND v.week = m.week
+             AND v.team_key = m.team2_key
             WHERE COALESCE(r.selected_position, '') NOT IN ('BN', 'IR', '')
 
             UNION ALL
@@ -782,12 +832,161 @@ def position_points_against_query() -> str:
               ON r.year = m.year
              AND r.week = m.week
              AND r.team_key = m.team1_key
+            JOIN valid_team_scores v
+              ON v.year = m.year
+             AND v.week = m.week
+             AND v.team_key = m.team1_key
             WHERE COALESCE(r.selected_position, '') NOT IN ('BN', 'IR', '')
         )
         SELECT
             year, week, owner, team_name, opponent, selected_position,
             ROUND(SUM(points), 2) AS position_points_against
         FROM points_against
+        GROUP BY year, week, owner, team_name, opponent, selected_position
+        ORDER BY year DESC, week DESC, owner, selected_position
+    """
+
+
+def points_for_detail_query() -> str:
+    return """
+        WITH roster_starter_points AS (
+            SELECT year, week, team_key, ROUND(SUM(points), 2) AS starter_points
+            FROM rosters
+            WHERE COALESCE(selected_position, '') NOT IN ('BN', 'IR', '')
+            GROUP BY year, week, team_key
+        ), matchup_scores AS (
+            SELECT year, week, team1_key AS team_key, ROUND(team1_points, 2) AS official_points
+            FROM matchups
+            UNION ALL
+            SELECT year, week, team2_key AS team_key, ROUND(team2_points, 2) AS official_points
+            FROM matchups
+        ), valid_team_scores AS (
+            SELECT r.year, r.week, r.team_key
+            FROM roster_starter_points r
+            JOIN matchup_scores m
+              ON r.year = m.year
+             AND r.week = m.week
+             AND r.team_key = m.team_key
+            WHERE ABS(r.starter_points - m.official_points) <= 0.05
+        ), points_for AS (
+            SELECT
+                m.year,
+                m.week,
+                m.team1_owner AS owner,
+                m.team1_name AS team_name,
+                m.team2_owner AS opponent,
+                m.team2_name AS opponent_team_name,
+                r.selected_position,
+                r.player_name,
+                r.points
+            FROM matchups m
+            JOIN rosters r
+              ON r.year = m.year
+             AND r.week = m.week
+             AND r.team_key = m.team1_key
+            JOIN valid_team_scores v
+              ON v.year = m.year
+             AND v.week = m.week
+             AND v.team_key = m.team1_key
+            WHERE COALESCE(r.selected_position, '') NOT IN ('BN', 'IR', '')
+
+            UNION ALL
+
+            SELECT
+                m.year,
+                m.week,
+                m.team2_owner AS owner,
+                m.team2_name AS team_name,
+                m.team1_owner AS opponent,
+                m.team1_name AS opponent_team_name,
+                r.selected_position,
+                r.player_name,
+                r.points
+            FROM matchups m
+            JOIN rosters r
+              ON r.year = m.year
+             AND r.week = m.week
+             AND r.team_key = m.team2_key
+            JOIN valid_team_scores v
+              ON v.year = m.year
+             AND v.week = m.week
+             AND v.team_key = m.team2_key
+            WHERE COALESCE(r.selected_position, '') NOT IN ('BN', 'IR', '')
+        )
+        SELECT
+            year, week, owner, team_name, opponent, opponent_team_name,
+            selected_position, player_name, ROUND(points, 2) AS points
+        FROM points_for
+        ORDER BY year DESC, week DESC, owner, selected_position, points DESC
+    """
+
+
+def position_points_for_query() -> str:
+    return """
+        WITH roster_starter_points AS (
+            SELECT year, week, team_key, ROUND(SUM(points), 2) AS starter_points
+            FROM rosters
+            WHERE COALESCE(selected_position, '') NOT IN ('BN', 'IR', '')
+            GROUP BY year, week, team_key
+        ), matchup_scores AS (
+            SELECT year, week, team1_key AS team_key, ROUND(team1_points, 2) AS official_points
+            FROM matchups
+            UNION ALL
+            SELECT year, week, team2_key AS team_key, ROUND(team2_points, 2) AS official_points
+            FROM matchups
+        ), valid_team_scores AS (
+            SELECT r.year, r.week, r.team_key
+            FROM roster_starter_points r
+            JOIN matchup_scores m
+              ON r.year = m.year
+             AND r.week = m.week
+             AND r.team_key = m.team_key
+            WHERE ABS(r.starter_points - m.official_points) <= 0.05
+        ), points_for AS (
+            SELECT
+                m.year,
+                m.week,
+                m.team1_owner AS owner,
+                m.team1_name AS team_name,
+                m.team2_owner AS opponent,
+                r.selected_position,
+                r.points
+            FROM matchups m
+            JOIN rosters r
+              ON r.year = m.year
+             AND r.week = m.week
+             AND r.team_key = m.team1_key
+            JOIN valid_team_scores v
+              ON v.year = m.year
+             AND v.week = m.week
+             AND v.team_key = m.team1_key
+            WHERE COALESCE(r.selected_position, '') NOT IN ('BN', 'IR', '')
+
+            UNION ALL
+
+            SELECT
+                m.year,
+                m.week,
+                m.team2_owner AS owner,
+                m.team2_name AS team_name,
+                m.team1_owner AS opponent,
+                r.selected_position,
+                r.points
+            FROM matchups m
+            JOIN rosters r
+              ON r.year = m.year
+             AND r.week = m.week
+             AND r.team_key = m.team2_key
+            JOIN valid_team_scores v
+              ON v.year = m.year
+             AND v.week = m.week
+             AND v.team_key = m.team2_key
+            WHERE COALESCE(r.selected_position, '') NOT IN ('BN', 'IR', '')
+        )
+        SELECT
+            year, week, owner, team_name, opponent, selected_position,
+            ROUND(SUM(points), 2) AS position_points_for
+        FROM points_for
         GROUP BY year, week, owner, team_name, opponent, selected_position
         ORDER BY year DESC, week DESC, owner, selected_position
     """
@@ -1498,38 +1697,52 @@ def render_head_to_head() -> None:
 
 def render_positional_points_against() -> None:
     st.title("Positional Points Against")
-    st.write(
-        "Compare starter points allowed by position. Multi-player positions are "
-        "summed by matchup first, then averaged."
-    )
 
-    position_totals = run_query(position_points_against_query())
-    detail = run_query(points_against_detail_query())
+    with st.container(border=True):
+        mode = st.radio(
+            "Choose points direction",
+            ["Against", "For"],
+            horizontal=True,
+            key="positional_points_direction",
+        )
+
+    if mode == "For":
+        position_totals = run_query(position_points_for_query()).rename(
+            columns={"position_points_for": "position_points"}
+        )
+        detail = run_query(points_for_detail_query())
+        mode_lower = "for"
+    else:
+        position_totals = run_query(position_points_against_query()).rename(
+            columns={"position_points_against": "position_points"}
+        )
+        detail = run_query(points_against_detail_query())
+        mode_lower = "against"
 
     if position_totals.empty:
-        st.warning("No starter roster points found for positional points against.")
+        st.warning(f"No starter roster points found for positional points {mode_lower}.")
         return
 
     years = sorted(position_totals["year"].dropna().unique().tolist(), reverse=True)
     owners = sorted(position_totals["owner"].dropna().unique().tolist())
 
     with st.container(border=True):
-        st.caption("POSITIONAL POINTS AGAINST FILTERS")
+        st.caption(f"POSITIONAL POINTS {mode.upper()} FILTERS")
         col1, col2, col3 = st.columns(3)
         selected_owner = col1.selectbox(
             dropdown_label("owner"),
             owners,
-            key="points_against_owner",
+            key="positional_points_owner",
         )
         selected_year = col2.selectbox(
             dropdown_label("year"),
             ["All seasons", *years],
-            key="points_against_year",
+            key="positional_points_year",
         )
         selected_position = col3.selectbox(
             dropdown_label("position"),
             STARTER_POSITION_ORDER,
-            key="points_against_position",
+            key="positional_points_position",
         )
 
     if selected_year != "All seasons":
@@ -1540,27 +1753,23 @@ def render_positional_points_against() -> None:
         position_totals.groupby(["owner", "selected_position"], as_index=False)
         .agg(
             team_name=("team_name", "first"),
-            games=("position_points_against", "count"),
-            total_points_against=("position_points_against", "sum"),
-            avg_points_against=("position_points_against", "mean"),
+            games=("position_points", "count"),
+            total_points=("position_points", "sum"),
+            avg_points=("position_points", "mean"),
         )
     )
-    summary["total_points_against"] = summary["total_points_against"].round(2)
-    summary["avg_points_against"] = summary["avg_points_against"].round(2)
+    summary["total_points"] = summary["total_points"].round(2)
+    summary["avg_points"] = summary["avg_points"].round(2)
 
     league_avg = (
-        position_totals.groupby("selected_position", as_index=False)[
-            "position_points_against"
-        ]
+        position_totals.groupby("selected_position", as_index=False)["position_points"]
         .mean()
-        .rename(columns={"position_points_against": "league_avg_points_against"})
+        .rename(columns={"position_points": "league_avg_points"})
     )
-    league_avg["league_avg_points_against"] = league_avg[
-        "league_avg_points_against"
-    ].round(2)
+    league_avg["league_avg_points"] = league_avg["league_avg_points"].round(2)
     summary = summary.merge(league_avg, on="selected_position", how="left")
     summary["difference_vs_league_avg"] = (
-        summary["avg_points_against"] - summary["league_avg_points_against"]
+        summary["avg_points"] - summary["league_avg_points"]
     ).round(2)
 
     owner_summary = summary[summary["owner"] == selected_owner].copy()
@@ -1569,22 +1778,22 @@ def render_positional_points_against() -> None:
         .merge(owner_summary, on="selected_position", how="left")
         .merge(league_avg, on="selected_position", how="left", suffixes=("", "_league"))
     )
-    owner_chart["avg_points_against"] = owner_chart["avg_points_against"].fillna(0)
-    owner_chart["league_avg_points_against"] = owner_chart[
-        "league_avg_points_against"
-    ].fillna(0)
-    chart_data = owner_chart[
-        ["selected_position", "avg_points_against", "league_avg_points_against"]
-    ].melt(
+    if "league_avg_points_league" in owner_chart.columns:
+        owner_chart["league_avg_points"] = owner_chart["league_avg_points"].combine_first(
+            owner_chart["league_avg_points_league"]
+        )
+    owner_chart["avg_points"] = owner_chart["avg_points"].fillna(0)
+    owner_chart["league_avg_points"] = owner_chart["league_avg_points"].fillna(0)
+    chart_data = owner_chart[["selected_position", "avg_points", "league_avg_points"]].melt(
         id_vars="selected_position",
-        value_vars=["avg_points_against", "league_avg_points_against"],
+        value_vars=["avg_points", "league_avg_points"],
         var_name="series",
-        value_name="points_against",
+        value_name="points",
     )
     chart_data["series"] = chart_data["series"].map(
         {
-            "avg_points_against": f"{selected_owner} Avg",
-            "league_avg_points_against": "League Avg",
+            "avg_points": f"{selected_owner} Avg",
+            "league_avg_points": "League Avg",
         }
     )
 
@@ -1596,12 +1805,12 @@ def render_positional_points_against() -> None:
         league_avg["selected_position"] == selected_position
     ]
     owner_avg = (
-        selected_owner_position.iloc[0]["avg_points_against"]
+        selected_owner_position.iloc[0]["avg_points"]
         if not selected_owner_position.empty
         else 0
     )
     league_position_avg = (
-        selected_league_avg.iloc[0]["league_avg_points_against"]
+        selected_league_avg.iloc[0]["league_avg_points"]
         if not selected_league_avg.empty
         else 0
     )
@@ -1609,7 +1818,7 @@ def render_positional_points_against() -> None:
 
     metric_cols = st.columns(4)
     metric_cols[0].metric("Owner", selected_owner)
-    metric_cols[1].metric(f"{selected_position} Avg Against", f"{owner_avg:.2f}")
+    metric_cols[1].metric(f"{selected_position} Avg {mode}", f"{owner_avg:.2f}")
     metric_cols[2].metric("League Avg", f"{league_position_avg:.2f}")
     metric_cols[3].metric("Difference", f"{difference:+.2f}")
 
@@ -1618,23 +1827,30 @@ def render_positional_points_against() -> None:
         grouped_bar_chart(
             chart_data,
             x="selected_position",
-            y="points_against",
+            y="points",
             group="series",
             x_title="Position",
-            y_title="Average points against",
+            y_title=f"Average points {mode_lower}",
             group_title="Comparison",
         )
 
     leaderboard = summary[summary["selected_position"] == selected_position].copy()
     leaderboard = leaderboard.sort_values(
-        ["avg_points_against", "owner"], ascending=[False, True]
+        ["avg_points", "owner"], ascending=[False, True]
     ).reset_index(drop=True)
     leaderboard.insert(0, "rank", leaderboard.index + 1)
+    leaderboard = leaderboard.rename(
+        columns={
+            "avg_points": f"avg_points_{mode_lower}",
+            "league_avg_points": f"league_avg_points_{mode_lower}",
+            "total_points": f"total_points_{mode_lower}",
+        }
+    )
     leaderboard = leaderboard[
         [
             "rank", "owner", "team_name", "selected_position", "games",
-            "avg_points_against", "league_avg_points_against",
-            "difference_vs_league_avg", "total_points_against",
+            f"avg_points_{mode_lower}", f"league_avg_points_{mode_lower}",
+            "difference_vs_league_avg", f"total_points_{mode_lower}",
         ]
     ]
 
@@ -1645,7 +1861,7 @@ def render_positional_points_against() -> None:
             format_table(leaderboard)
     with right:
         with st.container(border=True):
-            st.subheader(f"{selected_owner} {selected_position} game log")
+            st.subheader(f"{selected_owner} {selected_position} points {mode_lower} log")
             log = detail[
                 (detail["owner"] == selected_owner)
                 & (detail["selected_position"] == selected_position)
