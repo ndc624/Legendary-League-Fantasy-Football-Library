@@ -1696,7 +1696,7 @@ def render_head_to_head() -> None:
 
 
 def render_positional_points_against() -> None:
-    st.title("Positional Points Against")
+    st.title("Positional Points")
 
     with st.container(border=True):
         mode = st.radio(
@@ -1846,13 +1846,14 @@ def render_positional_points_against() -> None:
             "total_points": f"total_points_{mode_lower}",
         }
     )
-    leaderboard = leaderboard[
-        [
-            "rank", "owner", "team_name", "selected_position", "games",
-            f"avg_points_{mode_lower}", f"league_avg_points_{mode_lower}",
-            "difference_vs_league_avg", f"total_points_{mode_lower}",
-        ]
+    leaderboard_columns = [
+        "rank", "owner", "selected_position", "games",
+        f"avg_points_{mode_lower}", f"league_avg_points_{mode_lower}",
+        "difference_vs_league_avg", f"total_points_{mode_lower}",
     ]
+    if selected_year != "All seasons":
+        leaderboard_columns.insert(2, "team_name")
+    leaderboard = leaderboard[leaderboard_columns]
 
     left, right = st.columns([1.15, 1])
     with left:
@@ -2150,7 +2151,7 @@ page = st.sidebar.radio(
         "Owner History",
         "Scoring History",
         "Head-to-Head",
-        "Positional Points Against",
+        "Positional Points",
         "Roster Matchups",
         "Query Library",
     ],
@@ -2165,7 +2166,7 @@ elif page == "Scoring History":
     render_scoring_history()
 elif page == "Head-to-Head":
     render_head_to_head()
-elif page == "Positional Points Against":
+elif page == "Positional Points":
     render_positional_points_against()
 elif page == "Roster Matchups":
     render_roster_matchups()
