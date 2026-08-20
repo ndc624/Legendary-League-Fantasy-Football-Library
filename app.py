@@ -1100,7 +1100,7 @@ QUERY_LIBRARY = {
         GROUP BY team_owner
         ORDER BY playoff_losses DESC, team_owner
     """,
-    "Average wins per season": """
+    "Average total wins per season": """
         SELECT
             team_owner,
             COUNT(DISTINCT year) AS seasons_played,
@@ -1429,11 +1429,12 @@ def render_owner_history() -> None:
         """
         SELECT
             COUNT(DISTINCT year) AS seasons,
-            SUM(total_wins) AS wins,
-            SUM(total_losses) AS losses,
+            SUM(wins) AS regular_season_wins,
+            SUM(losses) AS regular_season_losses,
             SUM(ties) AS ties,
             SUM(playoff_wins) AS playoff_wins,
-            SUM(playoff_losses) AS playoff_losses
+            SUM(playoff_losses) AS playoff_losses,
+            SUM(total_wins + total_losses + ties) AS total_games_played
         FROM standings WHERE team_owner = ?
         """,
         (selected_owner,),
@@ -1448,13 +1449,14 @@ def render_owner_history() -> None:
         (selected_owner,),
     ).iloc[0]["titles"]
 
-    cols = st.columns(6)
+    cols = st.columns(7)
     cols[0].metric("Seasons", int(summary["seasons"]))
-    cols[1].metric("Wins", int(summary["wins"]))
-    cols[2].metric("Losses", int(summary["losses"]))
+    cols[1].metric("Regular season wins", int(summary["regular_season_wins"]))
+    cols[2].metric("Regular season losses", int(summary["regular_season_losses"]))
     cols[3].metric("Playoff wins", int(summary["playoff_wins"]))
     cols[4].metric("Playoff losses", int(summary["playoff_losses"]))
-    cols[5].metric("Championships", int(titles))
+    cols[5].metric("Total games played", int(summary["total_games_played"]))
+    cols[6].metric("Championships", int(titles))
 
     history = run_query(
         """
@@ -1494,7 +1496,7 @@ def render_owner_history() -> None:
                 "Championships",
                 "Playoff wins",
                 "Playoff losses",
-                "Average wins per season",
+                "Average total wins per season",
             ],
         )
         format_table(run_query(QUERY_LIBRARY[leaderboard]))
