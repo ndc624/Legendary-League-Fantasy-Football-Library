@@ -1478,17 +1478,17 @@ def render_overview() -> None:
             format_table(champions)
 
     with st.container(border=True):
-        st.subheader("All-time wins")
-        career_wins = run_query(QUERY_LIBRARY["Career wins (including playoffs)"])
-        career_wins = career_wins.sort_values(
-            "career_wins", ascending=False
+        st.subheader("Career win percentage (min 3 seasons)")
+        career_win_rate = run_query(QUERY_LIBRARY["Career win rate (minimum 3 seasons)"])
+        career_win_rate = career_win_rate.sort_values(
+            "career_win_rate", ascending=False
         ).reset_index(drop=True)
         ordered_bar_chart(
-            career_wins,
+            career_win_rate,
             category="team_owner",
-            value="career_wins",
+            value="career_win_rate",
             category_title="Owner",
-            value_title="Career wins",
+            value_title="Career win percentage",
         )
 
 
@@ -1955,7 +1955,7 @@ def render_positional_points_against() -> None:
 
 
 def render_draft_slot_value() -> None:
-    st.title("Draft Slot Value")
+    st.title("Draft Slot Value (WIP)")
 
     if not table_exists("draft_results"):
         st.warning(
@@ -2371,7 +2371,7 @@ page = st.sidebar.radio(
         "Scoring History",
         "Head-to-Head",
         "Positional Points",
-        "Draft Slot Value",
+        "Draft Slot Value (WIP)",
         "Roster Matchups",
         "Query Library",
     ],
@@ -2388,7 +2388,7 @@ elif page == "Head-to-Head":
     render_head_to_head()
 elif page == "Positional Points":
     render_positional_points_against()
-elif page == "Draft Slot Value":
+elif page == "Draft Slot Value (WIP)":
     render_draft_slot_value()
 elif page == "Roster Matchups":
     render_roster_matchups()
