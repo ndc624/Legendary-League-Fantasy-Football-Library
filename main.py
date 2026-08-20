@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update Yahoo fantasy football roster, matchup, standings, and champions CSVs."""
+"""Update Yahoo fantasy football roster, matchup, standings, draft, and champions CSVs."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ ROSTER_CSV = "all_rosters_master.csv"
 MATCHUP_CSV = "matchups_master.csv"
 STANDINGS_CSV = "standings_master.csv"
 CHAMPIONS_CSV = "champions.csv"
+DRAFT_RESULTS_CSV = "draft_results.csv"
 
 ROSTER_FIELDS = [
     "year", "week", "team_name", "team_owner", "team_key",
@@ -43,6 +44,12 @@ MATCHUP_FIELDS = [
 ]
 
 CHAMPION_FIELDS = ["year", "team_key", "team_name", "wins", "losses"]
+
+DRAFT_RESULT_FIELDS = [
+    "year", "league_id", "draft_slot", "round", "pick", "cost",
+    "team_key", "team_owner", "team_name", "player_id", "player_name",
+    "display_position", "primary_position", "editorial_team_abbr",
+]
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
@@ -116,6 +123,15 @@ def matchup_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
 
 def champion_key(row: dict[str, Any]) -> tuple[str]:
     return (str(row.get("year", "")).strip(),)
+
+
+def draft_result_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(row.get("year", "")).strip(),
+        str(row.get("league_id", "")).strip(),
+        str(row.get("pick", "")).strip(),
+        str(row.get("team_key", "")).strip(),
+    )
 
 
 def extract_projection(value: Any) -> float | str:
@@ -376,6 +392,121 @@ def update_champion(
     return {**champion, "new": was_new, "updated": True, "missing_weeks": []}
 
 
+def player_name_from_details(details: dict[str, Any]) -> str:
+    name = details.get("name", "")
+    if isinstance(name, dict):
+        return str(name.get("full", "") or "").strip()
+    return str(name or "").strip()
+
+
+def get_player_detail_map(league, player_ids: Iterable[Any]) -> dict[int, dict[str, Any]]:
+    ids: list[int] = []
+    for player_id in player_ids:
+        try:
+            ids.append(int(player_id))
+        except (TypeError, ValueError):
+            continue
+
+    details_by_id: dict[int, dict[str, Any]] = {}
+    for start in range(0, len(ids), 25):
+        batch = ids[start : start + 25]
+        try:
+            for details in league.player_details(batch):
+                try:
+                    details_by_id[int(details.get("player_id"))] = details
+                except (TypeError, ValueError):
+                    continue
+        except Exception as error:
+            print(f"Draft results: player detail lookup failed for batch {batch}: {error}")
+    return details_by_id
+
+
+def update_draft_results(
+    league,
+    year: str,
+    league_id: str,
+    output_path: Path,
+    owners_by_key: dict[str, str],
+    backup: bool = True,
+) -> dict[str, int]:
+    rows = load_csv(output_path, DRAFT_RESULT_FIELDS, draft_result_key)
+
+    try:
+        draft_results = league.draft_results()
+    except Exception as error:
+        print(f"Draft results {year}: skipped because Yahoo returned an error: {error}")
+        return {"processed": 0, "new": 0}
+
+    if not draft_results:
+        print(f"Draft results {year}: Yahoo returned no draft results.")
+        return {"processed": 0, "new": 0}
+
+    teams = league.teams()
+    player_details = get_player_detail_map(
+        league,
+        [result.get("player_id") for result in draft_results],
+    )
+    first_round_picks: dict[str, int] = {}
+    for result in draft_results:
+        team_key = str(result.get("team_key", "")).strip()
+        try:
+            draft_round = int(result.get("round", 0) or 0)
+            pick = int(result.get("pick", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if draft_round == 1 and team_key and team_key not in first_round_picks:
+            first_round_picks[team_key] = pick
+
+    new_count = 0
+    processed = 0
+    for result in draft_results:
+        team_key = str(result.get("team_key", "")).strip()
+        try:
+            player_id = int(result.get("player_id"))
+        except (TypeError, ValueError):
+            player_id = ""
+        details = player_details.get(player_id, {}) if player_id != "" else {}
+        row = {
+            "year": year,
+            "league_id": league_id,
+            "draft_slot": first_round_picks.get(team_key, ""),
+            "round": result.get("round", ""),
+            "pick": result.get("pick", ""),
+            "cost": result.get("cost", ""),
+            "team_key": team_key,
+            "team_owner": owners_by_key.get(team_key, ""),
+            "team_name": teams.get(team_key, {}).get("name", ""),
+            "player_id": player_id,
+            "player_name": player_name_from_details(details),
+            "display_position": details.get("display_position", ""),
+            "primary_position": details.get("primary_position", ""),
+            "editorial_team_abbr": details.get("editorial_team_abbr", ""),
+        }
+        key = draft_result_key(row)
+        if key not in rows:
+            new_count += 1
+        else:
+            for field in ("team_owner", "team_name", "player_name"):
+                if not row[field]:
+                    row[field] = rows[key].get(field, "")
+        rows[key] = row
+        processed += 1
+
+    write_csv(
+        output_path,
+        DRAFT_RESULT_FIELDS,
+        rows.values(),
+        lambda row: (
+            str(row.get("year", "")),
+            int(row.get("pick", 0) or 0),
+            str(row.get("team_name", "")),
+        ),
+        backup,
+    )
+    print(f"Draft results {year}: processed {processed} picks ({new_count} new).")
+    return {"processed": processed, "new": new_count}
+
+
 def last_non_empty(series: pd.Series) -> str:
     values = series.dropna().astype(str)
     values = values[values.str.strip() != ""]
@@ -525,6 +656,14 @@ def run_updates(
         owners_by_key,
         backup,
     )
+    draft_result = update_draft_results(
+        league,
+        year,
+        league_id,
+        data_path / DRAFT_RESULTS_CSV,
+        owners_by_key,
+        backup,
+    )
     standings_count = build_standings(data_path / MATCHUP_CSV, data_path / STANDINGS_CSV)
     champion_result = update_champion(
         league,
@@ -540,6 +679,7 @@ def run_updates(
         "available_leagues": available_leagues,
         "matchups": matchup_result,
         "rosters": roster_result,
+        "draft_results": draft_result,
         "standings_rows": standings_count,
         "champion": champion_result,
     }
@@ -596,6 +736,7 @@ def main() -> None:
         f"Finished {result['year']}: "
         f"{result['matchups']['processed']} matchups, "
         f"{result['rosters']['processed']} roster rows, "
+        f"{result['draft_results']['processed']} draft picks, "
         f"{result['standings_rows']} standings rows, "
         f"champion {champion_summary}."
     )

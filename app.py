@@ -307,6 +307,21 @@ def run_query(query: str, params: tuple = ()) -> pd.DataFrame:
         return pd.read_sql_query(query, connection, params=params)
 
 
+@st.cache_data(show_spinner=False)
+def table_exists(table_name: str) -> bool:
+    with sqlite3.connect(DB_PATH) as connection:
+        result = pd.read_sql_query(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            """,
+            connection,
+            params=(table_name,),
+        )
+    return not result.empty
+
+
 def display_label(value: str) -> str:
     return str(value).replace("_", " ").strip().title()
 
@@ -552,6 +567,67 @@ def grouped_bar_chart(
                 legend=alt.Legend(orient="top"),
             ),
             tooltip=tooltip,
+        )
+        .properties(height=390)
+        .configure(background=CHART_BACKGROUND)
+        .configure_view(fill=CHART_BACKGROUND, stroke="#4C525D", strokeWidth=0.7)
+        .configure_axis(
+            gridColor="#3B4049",
+            domainColor="#6B727D",
+            tickColor="#6B727D",
+            labelColor="#E2E4E8",
+            titleColor="#F0F1F3",
+        )
+        .configure_legend(labelColor="#E2E4E8", titleColor="#F0F1F3")
+    )
+    st.altair_chart(chart, width="stretch")
+
+
+def draft_slot_chart(data: pd.DataFrame, metric: str, metric_label: str) -> None:
+    chart_data = data.copy()
+    chart_data["draft_slot"] = pd.to_numeric(chart_data["draft_slot"], errors="coerce")
+    chart_data[metric] = pd.to_numeric(chart_data[metric], errors="coerce").round(2)
+    chart_data = chart_data.dropna(subset=["draft_slot", metric])
+
+    if chart_data.empty:
+        st.info("No draft slot data available for this selection.")
+        return
+
+    slot_order = sorted(chart_data["draft_slot"].astype(int).unique().tolist())
+    chart_data["draft_slot_label"] = chart_data["draft_slot"].astype(int).astype(str)
+    chart_data["owner_team"] = (
+        chart_data["team_owner"].astype(str)
+        + " - "
+        + chart_data["team_name"].astype(str)
+    )
+
+    chart = (
+        alt.Chart(chart_data)
+        .mark_circle(size=120, opacity=0.88)
+        .encode(
+            x=alt.X(
+                "draft_slot_label:N",
+                title="Draft Slot",
+                sort=[str(slot) for slot in slot_order],
+                axis=alt.Axis(labelAngle=0),
+            ),
+            y=alt.Y(
+                f"{metric}:Q",
+                title=metric_label,
+                axis=alt.Axis(format=".2f"),
+            ),
+            color=alt.Color(
+                "year:N",
+                title="Season",
+                scale=alt.Scale(range=CHART_COLORS),
+                legend=alt.Legend(orient="top"),
+            ),
+            tooltip=[
+                alt.Tooltip("year:N", title="Year"),
+                alt.Tooltip("draft_slot_label:N", title="Draft Slot"),
+                alt.Tooltip("owner_team:N", title="Team"),
+                alt.Tooltip(f"{metric}:Q", title=metric_label, format=".2f"),
+            ],
         )
         .properties(height=390)
         .configure(background=CHART_BACKGROUND)
@@ -1878,6 +1954,147 @@ def render_positional_points_against() -> None:
             format_table(log)
 
 
+def render_draft_slot_value() -> None:
+    st.title("Draft Slot Value")
+
+    if not table_exists("draft_results"):
+        st.warning(
+            "Draft results are not in the database yet. Run `python main.py`, "
+            "then `python load_to_sqlite.py` to create the draft_results table."
+        )
+        return
+
+    draft_rows = run_query(
+        """
+        WITH first_round AS (
+            SELECT
+                year,
+                league_id,
+                team_key,
+                team_owner,
+                team_name,
+                MIN(CAST(draft_slot AS INTEGER)) AS draft_slot
+            FROM draft_results
+            WHERE CAST(round AS INTEGER) = 1
+              AND TRIM(COALESCE(draft_slot, '')) <> ''
+              AND TRIM(COALESCE(team_owner, '')) <> '--hidden--'
+            GROUP BY year, league_id, team_key, team_owner, team_name
+        )
+        SELECT
+            f.year,
+            f.draft_slot,
+            f.team_owner,
+            f.team_name,
+            s.wins AS regular_season_wins,
+            s.losses AS regular_season_losses,
+            s.playoff_wins,
+            s.playoff_losses,
+            s.total_wins,
+            s.total_losses,
+            s.ties,
+            s.total_wins + s.total_losses + s.ties AS total_games_played,
+            ROUND(
+                1.0 * s.total_wins /
+                NULLIF(s.total_wins + s.total_losses + s.ties, 0),
+                3
+            ) AS total_win_rate
+        FROM first_round f
+        LEFT JOIN standings s
+          ON f.year = s.year
+         AND f.team_key = s.team_key
+        ORDER BY f.year DESC, f.draft_slot
+        """
+    )
+
+    if draft_rows.empty:
+        st.warning("No draft slot rows found yet.")
+        return
+
+    years = sorted(draft_rows["year"].dropna().unique().tolist(), reverse=True)
+    metric_options = {
+        "Regular season wins": "regular_season_wins",
+        "Total wins": "total_wins",
+        "Total win rate": "total_win_rate",
+        "Playoff wins": "playoff_wins",
+        "Regular season losses": "regular_season_losses",
+        "Total losses": "total_losses",
+    }
+
+    with st.container(border=True):
+        st.caption("DRAFT SLOT FILTERS")
+        col1, col2 = st.columns(2)
+        selected_year = col1.selectbox(
+            dropdown_label("year"),
+            ["All seasons", *years],
+            key="draft_slot_year",
+        )
+        selected_metric_label = col2.selectbox(
+            dropdown_label("metric"),
+            list(metric_options),
+            key="draft_slot_metric",
+        )
+
+    filtered = draft_rows.copy()
+    if selected_year != "All seasons":
+        filtered = filtered[filtered["year"] == selected_year]
+
+    selected_metric = metric_options[selected_metric_label]
+    average_by_slot = (
+        filtered.groupby("draft_slot", as_index=False)
+        .agg(
+            seasons=("year", "count"),
+            avg_metric=(selected_metric, "mean"),
+        )
+        .sort_values("draft_slot")
+    )
+    average_by_slot["avg_metric"] = average_by_slot["avg_metric"].round(2)
+    average_by_slot = average_by_slot.rename(
+        columns={"avg_metric": f"avg_{selected_metric}"}
+    )
+
+    with st.container(border=True):
+        st.subheader(f"Draft slot vs {selected_metric_label.lower()}")
+        draft_slot_chart(filtered, selected_metric, selected_metric_label)
+
+    left, right = st.columns([1.15, 1])
+    with left:
+        with st.container(border=True):
+            st.subheader("Draft slot results")
+            display_rows = filtered[
+                [
+                    "year", "draft_slot", "team_owner", "team_name",
+                    "regular_season_wins", "regular_season_losses",
+                    "playoff_wins", "playoff_losses", "total_wins",
+                    "total_losses", "total_win_rate",
+                ]
+            ].sort_values(["year", "draft_slot"], ascending=[False, True])
+            format_table(display_rows)
+    with right:
+        with st.container(border=True):
+            st.subheader("Average by draft slot")
+            format_table(average_by_slot)
+
+    if table_exists("draft_results"):
+        with st.container(border=True):
+            st.subheader("First-round picks")
+            first_round_picks = run_query(
+                """
+                SELECT
+                    year, draft_slot, team_owner, team_name,
+                    pick, player_name, display_position, editorial_team_abbr
+                FROM draft_results
+                WHERE CAST(round AS INTEGER) = 1
+                  AND TRIM(COALESCE(team_owner, '')) <> '--hidden--'
+                ORDER BY year DESC, CAST(draft_slot AS INTEGER)
+                """
+            )
+            if selected_year != "All seasons":
+                first_round_picks = first_round_picks[
+                    first_round_picks["year"] == selected_year
+                ]
+            format_table(first_round_picks)
+
+
 def render_roster_matchups() -> None:
     st.title("Roster Matchups")
     owners = run_query(
@@ -2154,6 +2371,7 @@ page = st.sidebar.radio(
         "Scoring History",
         "Head-to-Head",
         "Positional Points",
+        "Draft Slot Value",
         "Roster Matchups",
         "Query Library",
     ],
@@ -2170,6 +2388,8 @@ elif page == "Head-to-Head":
     render_head_to_head()
 elif page == "Positional Points":
     render_positional_points_against()
+elif page == "Draft Slot Value":
+    render_draft_slot_value()
 elif page == "Roster Matchups":
     render_roster_matchups()
 elif page == "Current Season":

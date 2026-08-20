@@ -10,6 +10,7 @@ CSV_TABLES = {
     DATA_DIR / "all_rosters_master.csv": "rosters",
     DATA_DIR / "standings_master.csv": "standings",
     DATA_DIR / "champions.csv": "champions",
+    DATA_DIR / "draft_results.csv": "draft_results",
 }
 
 def clean_columns(df):
@@ -25,6 +26,9 @@ def load_csvs_to_sqlite():
     conn = sqlite3.connect(DB_PATH)
 
     for csv_path, table_name in CSV_TABLES.items():
+        if not csv_path.exists():
+            print(f"Skipped {csv_path}; file not found")
+            continue
         df = pd.read_csv(csv_path)
         df = clean_columns(df)
 
