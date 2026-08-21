@@ -2272,7 +2272,9 @@ def render_current_season() -> None:
             GROUP BY year, team_key
         )
         SELECT s.team_owner, COALESCE(n.team_name, '') AS team_name,
-               s.wins, s.losses, s.ties,
+               s.wins AS regular_season_wins,
+               s.losses AS regular_season_losses,
+               s.ties,
                s.wins || '-' || s.losses || '-' || s.ties AS record
         FROM standings s
         LEFT JOIN team_names n ON s.year = n.year AND s.team_key = n.team_key
@@ -2323,13 +2325,14 @@ def render_current_season() -> None:
     season_view = season_view.merge(streak_view, on="team_owner", how="left")
     season_view = season_view[
         [
-            "team_owner", "team_name", "wins", "losses", "ties", "record",
+            "team_owner", "team_name", "regular_season_wins",
+            "regular_season_losses", "ties", "record",
             "current_streak",
             "current_avg_score", "career_avg", "difference_from_career_avg",
         ]
     ]
     with st.container(border=True):
-        st.subheader("Current standings and scoring")
+        st.subheader("Current regular season standings and scoring")
         format_table(season_view)
 
     left, right = st.columns(2)
