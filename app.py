@@ -1483,10 +1483,13 @@ def render_overview() -> None:
         career_win_rate = career_win_rate.sort_values(
             "career_win_rate", ascending=False
         ).reset_index(drop=True)
+        career_win_rate["career_win_percentage"] = (
+            career_win_rate["career_win_rate"] * 100
+        ).round(2)
         ordered_bar_chart(
             career_win_rate,
             category="team_owner",
-            value="career_win_rate",
+            value="career_win_percentage",
             category_title="Owner",
             value_title="Career win percentage",
         )
